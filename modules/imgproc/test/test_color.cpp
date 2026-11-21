@@ -3428,4 +3428,37 @@ TEST(ImgProc_applyColorMap, userColor_1x256)
     }
 }
 
+TEST(Imgproc_cvtColor, unsupported_depth_message)
+{
+    const int codes[] = { cv::COLOR_BGR2GRAY, cv::COLOR_BGR2HSV, cv::COLOR_BGR2Lab };
+    for (int code : codes)
+    {
+        cv::Mat src(10, 10, CV_64FC3, cv::Scalar::all(0.5)), dst;
+        try {
+            cv::cvtColor(src, dst, code);
+            FAIL() << "cvtColor should throw for CV_64F input, code=" << code;
+        } catch (const cv::Exception& e) {
+            EXPECT_EQ(e.code, cv::Error::StsUnsupportedFormat);
+            const std::string msg = e.what();
+            EXPECT_NE(msg.find("CV_64F"), std::string::npos) << msg;
+            EXPECT_NE(msg.find("Supported depths for this conversion: CV_8U"), std::string::npos) << msg;
+            EXPECT_NE(msg.find("Convert the image to a supported depth"), std::string::npos) << msg;
+        }
+    }
+
+    // BGR2GRAY lists its exact depth set
+    try {
+        cv::Mat dst;
+        cv::cvtColor(cv::Mat(4, 4, CV_64FC3, cv::Scalar::all(0)), dst, cv::COLOR_BGR2GRAY);
+        FAIL();
+    } catch (const cv::Exception& e) {
+        EXPECT_NE(std::string(e.what()).find("CV_8U, CV_16U, CV_32F"), std::string::npos) << e.what();
+    }
+
+    // supported depths still work
+    cv::Mat dst;
+    EXPECT_NO_THROW(cv::cvtColor(cv::Mat(4, 4, CV_8UC3, cv::Scalar::all(1)), dst, cv::COLOR_BGR2GRAY));
+    EXPECT_NO_THROW(cv::cvtColor(cv::Mat(4, 4, CV_32FC3, cv::Scalar::all(1)), dst, cv::COLOR_BGR2GRAY));
+}
+
 }} // namespace
