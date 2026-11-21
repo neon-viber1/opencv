@@ -1286,7 +1286,20 @@ public:
     */
     Mat& operator = (const MatExpr& expr);
 
-    //! retrieve UMat from Mat
+    /** @brief Retrieves a UMat that refers to the data of this Mat.
+    @note
+      The returned UMat may either share memory with the Mat or hold a separate copy; this is
+      implementation-defined and depends on the device, matrix size, type, alignment and step.
+      Data is synchronized back to the Mat when the returned UMat is released (goes out of scope).
+      While the UMat is alive:
+      - do not modify the source Mat in ACCESS_RW mode (or chain `getUMat().getMat()`), because
+        the contents seen through the other object are unspecified;
+      - both objects may be safely read;
+      - do not keep the derived UMat in long-lived containers.
+      Read the result through the Mat only after the UMat has been released.
+    @param accessFlags access flags, see cv::AccessFlag
+    @param usageFlags usage flags for the allocator, see cv::UMatUsageFlags
+    */
     UMat getUMat(AccessFlag accessFlags, UMatUsageFlags usageFlags = USAGE_DEFAULT) const;
 
     /** @brief Copies the matrix into a new UMat on @p device (see cv::accel), or into a regular
@@ -2856,6 +2869,11 @@ public:
     UMat& operator = (const UMat& m);
 
     /** @brief Returns a Mat header giving host access to the same data
+    @note
+      The returned Mat may share memory with the UMat or hold a mapped copy (implementation-defined).
+      Changes are synchronized back when the returned Mat is released. While it is alive, do not
+      modify the source UMat, and do not chain `getMat().getUMat()` in ACCESS_RW mode: the result
+      of such concurrent access is unspecified. Both objects may be safely read.
     @note
       The data is mapped into host memory on the first such view and unmapped when the
       returned Mat is destroyed. @p flags is widened to ACCESS_RW internally, so the

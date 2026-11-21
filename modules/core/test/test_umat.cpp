@@ -1491,4 +1491,39 @@ TEST(UMat, copyTo_across_allocators)
     EXPECT_EQ(0, cvtest::norm(src, back, NORM_INF));
 }
 
+typedef tuple<Size, int> UMatSyncParams;
+typedef testing::TestWithParam<UMatSyncParams> UMatSyncOnRelease;
+
+OCL_TEST_P(UMatSyncOnRelease, Mat_getUMat_release_then_read)
+{
+    Size sz = get<0>(GetParam());
+    int type = get<1>(GetParam());
+    Mat m = Mat::zeros(sz, type);
+    {
+        UMat u = m.getUMat(ACCESS_RW);
+        u.setTo(Scalar(0, 0, 255));
+    }
+    Mat expected(sz, type, Scalar(0, 0, 255));
+    EXPECT_EQ(0, cvtest::norm(m, expected, NORM_INF));
+}
+
+OCL_TEST_P(UMatSyncOnRelease, UMat_getMat_release_then_read)
+{
+    Size sz = get<0>(GetParam());
+    int type = get<1>(GetParam());
+    UMat u(sz, type);
+    u.setTo(Scalar::all(0));
+    {
+        Mat m = u.getMat(ACCESS_RW);
+        m.setTo(Scalar(0, 0, 255));
+    }
+    Mat expected(sz, type, Scalar(0, 0, 255));
+    Mat result;
+    u.copyTo(result);
+    EXPECT_EQ(0, cvtest::norm(result, expected, NORM_INF));
+}
+
+OCL_INSTANTIATE_TEST_CASE_P(UMat, UMatSyncOnRelease,
+    Combine(Values(Size(2760, 1932), Size(2760, 1936)), Values((int)CV_8UC3, (int)CV_32FC3)));
+
 } } // namespace opencv_test::ocl
