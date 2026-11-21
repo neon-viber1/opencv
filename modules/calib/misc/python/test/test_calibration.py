@@ -194,6 +194,36 @@ class calibration_test(NewOpenCVTests):
         self.assertLess(cv.norm(R_cam2gripper - R_cam2gripper_gt, cv.NORM_L1), 1e-3)
         self.assertLess(cv.norm(t_cam2gripper.flatten() - t_cam2gripper_gt, cv.NORM_L1), 1e-3)
 
+    def test_calibrateHandEye_method_keyword(self):
+        np.random.seed(12345)
+        R_gt, t_gt = self._random_rt()
+        X = self._to_T(R_gt, t_gt)
+        R_t2b, t_t2b = self._random_rt()
+        Wt = self._to_T(R_t2b, t_t2b)
+
+        Rg, tg, Rc, tc = [], [], [], []
+        for _ in range(20):
+            R_g2b, t_g2b = self._random_rt()
+            G = self._to_T(R_g2b, t_g2b)
+            T = np.linalg.inv(X) @ np.linalg.inv(G) @ Wt
+            noise_R, _ = cv.Rodrigues(np.random.normal(0, 1e-3, 3))
+            Rg.append(R_g2b)
+            tg.append(t_g2b)
+            Rc.append(noise_R @ T[:3, :3])
+            tc.append(T[:3, 3] + np.random.normal(0, 1e-2, 3))
+
+        methods = [cv.CALIB_HAND_EYE_TSAI, cv.CALIB_HAND_EYE_PARK, cv.CALIB_HAND_EYE_HORAUD,
+                   cv.CALIB_HAND_EYE_ANDREFF, cv.CALIB_HAND_EYE_DANIILIDIS]
+        results = []
+        for m in methods:
+            R, t = cv.calibrateHandEye(Rg, tg, Rc, tc, method=m)
+            self.assertLess(cv.norm(R - R_gt, cv.NORM_L1), 0.1)
+            self.assertLess(cv.norm(t.flatten() - t_gt, cv.NORM_L1), 1.0)
+            results.append(np.hstack([R.flatten(), t.flatten()]))
+
+        max_diff = max(np.abs(a - b).max() for a in results for b in results)
+        self.assertGreater(max_diff, 1e-9)
+
     def test_calibrateRobotWorldHandEye(self):
         # Ground truth outputs (what calibrateRobotWorldHandEye should recover)
         R_base2world_gt, t_base2world_gt = self._random_rt()

@@ -1264,6 +1264,11 @@ Additional information can be found on this [website](http://campar.in.tum.de/Ch
 A minimum of 2 motions with non parallel rotation axes are necessary to determine the hand-eye transformation.
 So at least 3 different poses are required, but it is strongly recommended to use many more poses.
 
+\note
+In Python, the output arguments `R_cam2gripper` and `t_cam2gripper` precede `method`, so a method passed as the
+fifth positional argument is taken as `R_cam2gripper` and the default method is used. Pass it by keyword instead,
+e.g. `cv.calibrateHandEye(..., method=cv.CALIB_HAND_EYE_PARK)`.
+
  */
 CV_EXPORTS_W void calibrateHandEye( InputArrayOfArrays R_gripper2base, InputArrayOfArrays t_gripper2base,
                                     InputArrayOfArrays R_target2cam, InputArrayOfArrays t_target2cam,
@@ -1406,6 +1411,8 @@ This problem is also known as solving the \f$\mathbf{A}\mathbf{X}=\mathbf{Z}\mat
 
 \note
 At least 3 measurements are required (input vectors size must be greater or equal to 3).
+\note
+In Python, pass `method` by keyword (e.g. `method=cv.CALIB_ROBOT_WORLD_HAND_EYE_LI`), because the output arguments precede it.
 
  */
 CV_EXPORTS_W void calibrateRobotWorldHandEye( InputArrayOfArrays R_world2cam, InputArrayOfArrays t_world2cam,
