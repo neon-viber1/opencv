@@ -811,4 +811,89 @@ TEST(Objdetect_QRCode_decode, unsupported_mode_returns_empty)
     EXPECT_TRUE(decoded_info.empty());
 }
 
+static Mat makeQRImage(const std::string& msg, bool inverted, int scale = 8)
+{
+    Mat qrImg, src;
+    QRCodeEncoder::Params params;
+    Ptr<QRCodeEncoder> enc = QRCodeEncoder::create(params);
+    enc->encode(msg, qrImg);
+    cv::resize(qrImg, src, qrImg.size() * scale, 0, 0, INTER_NEAREST);
+    cv::copyMakeBorder(src, src, 40, 40, 40, 40, BORDER_CONSTANT, Scalar(255));
+    if (inverted)
+        cv::bitwise_not(src, src);
+    return src;
+}
+
+typedef testing::TestWithParam<bool> Objdetect_QRCode_inverted;
+
+TEST_P(Objdetect_QRCode_inverted, single)
+{
+    const bool aruco = GetParam();
+    const std::string msg = "https://example.org/event-flyer-test";
+    Mat normal = makeQRImage(msg, false), inverted = makeQRImage(msg, true);
+    Ptr<GraphicalCodeDetector> det = aruco ? makePtr<QRCodeDetectorAruco>().staticCast<GraphicalCodeDetector>()
+                                           : makePtr<QRCodeDetector>().staticCast<GraphicalCodeDetector>();
+    // reuse the same detector: inverted -> normal -> inverted
+    for (int pass = 0; pass < 3; pass++)
+    {
+        const Mat& img = (pass % 2 == 0) ? inverted : normal;
+        std::vector<Point2f> pts;
+        Mat straight;
+        EXPECT_EQ(msg, det->detectAndDecode(img, pts, straight)) << "pass " << pass;
+        EXPECT_EQ(4u, pts.size());
+        EXPECT_FALSE(straight.empty());
+
+        std::vector<Point2f> pts2;
+        ASSERT_TRUE(det->detect(img, pts2));
+        EXPECT_EQ(msg, det->decode(img, pts2));
+    }
+}
+
+TEST_P(Objdetect_QRCode_inverted, multi)
+{
+    const bool aruco = GetParam();
+    Mat a = makeQRImage("first code", true, 6), b = makeQRImage("second code", true, 6);
+    Mat img;
+    cv::hconcat(a, b, img);
+    Ptr<GraphicalCodeDetector> det = aruco ? makePtr<QRCodeDetectorAruco>().staticCast<GraphicalCodeDetector>()
+                                           : makePtr<QRCodeDetector>().staticCast<GraphicalCodeDetector>();
+    std::vector<Point2f> pts;
+    std::vector<std::string> info;
+    ASSERT_TRUE(det->detectMulti(img, pts));
+    EXPECT_EQ(8u, pts.size());
+    EXPECT_TRUE(det->decodeMulti(img, pts, info));
+    std::sort(info.begin(), info.end());
+    ASSERT_EQ(2u, info.size());
+    EXPECT_EQ("first code", info[0]);
+    EXPECT_EQ("second code", info[1]);
+
+    info.clear(); pts.clear();
+    EXPECT_TRUE(det->detectAndDecodeMulti(img, info, pts));
+    std::sort(info.begin(), info.end());
+    ASSERT_EQ(2u, info.size());
+    EXPECT_EQ("first code", info[0]);
+    EXPECT_EQ("second code", info[1]);
+}
+
+TEST_P(Objdetect_QRCode_inverted, no_false_positive)
+{
+    const bool aruco = GetParam();
+    Ptr<GraphicalCodeDetector> det = aruco ? makePtr<QRCodeDetectorAruco>().staticCast<GraphicalCodeDetector>()
+                                           : makePtr<QRCodeDetector>().staticCast<GraphicalCodeDetector>();
+    Mat blank(200, 200, CV_8UC1, Scalar(0)), white(200, 200, CV_8UC1, Scalar(255)), noise(200, 200, CV_8UC1);
+    cv::RNG rng(42);
+    rng.fill(noise, RNG::UNIFORM, 0, 256);
+    for (const Mat& img : {blank, white, noise})
+    {
+        std::vector<Point2f> pts;
+        EXPECT_TRUE(det->detectAndDecode(img, pts).empty());
+        std::vector<std::string> info;
+        det->detectAndDecodeMulti(img, info, pts);
+        for (const std::string& s : info)
+            EXPECT_TRUE(s.empty());
+    }
+}
+
+INSTANTIATE_TEST_CASE_P(/**/, Objdetect_QRCode_inverted, testing::Bool());
+
 }} // namespace

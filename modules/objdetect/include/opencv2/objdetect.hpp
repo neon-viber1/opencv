@@ -215,7 +215,11 @@ public:
 
 };
 
-/** @brief QR code detector. */
+/** @brief QR code detector.
+
+Codes with light modules on a dark background (inverted codes) are also supported: they are tried
+automatically only when no code is found or decoded in the normal polarity.
+*/
 class CV_EXPORTS_W_SIMPLE QRCodeDetector : public GraphicalCodeDetector
 {
 public:
@@ -264,7 +268,10 @@ public:
     CV_WRAP QRCodeEncoder::ECIEncodings getEncoding(int codeIdx = 0);
 };
 
-/** @brief QR code detector based on Aruco markers detection code. */
+/** @brief QR code detector based on Aruco markers detection code.
+
+Inverted (light on dark) codes are tried automatically as a fallback when the normal polarity fails.
+*/
 class CV_EXPORTS_W_SIMPLE QRCodeDetectorAruco : public GraphicalCodeDetector {
 public:
     CV_WRAP QRCodeDetectorAruco();

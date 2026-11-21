@@ -44,6 +44,15 @@ static bool checkQRInputImage(InputArray img, Mat& gray)
     return true;
 }
 
+// Returns the polarity-inverted copy of an 8U grayscale image (white modules on a dark background
+// become dark modules on a light background). Used only as a fallback after a normal pass failed.
+static Mat invertQRImage(const Mat& gray)
+{
+    Mat inverted;
+    bitwise_not(gray, inverted);
+    return inverted;
+}
+
 static void updatePointsResult(OutputArray points_, const vector<Point2f>& points)
 {
     if (points_.needed())
@@ -979,6 +988,10 @@ public:
     mutable vector<QRCodeEncoder::ECIEncodings> encodings;
     bool useAlignmentMarkers = true;
 
+    bool detectSingle(const Mat& gray, vector<Point2f>& points) const;
+    bool detectMultiSingle(const Mat& gray, vector<Point2f>& points) const;
+    std::string decodeSingle(const Mat& gray, const vector<Point2f>& points, OutputArray straight_qrcode) const;
+
     bool detect(InputArray in, OutputArray points) const override;
     std::string decode(InputArray img, InputArray points, OutputArray straight_qrcode) const override;
     std::string detectAndDecode(InputArray img, OutputArray points, OutputArray straight_qrcode) const override;
@@ -1023,12 +1036,24 @@ bool ImplContour::detect(InputArray in, OutputArray points) const
     if (!checkQRInputImage(in, inarr))
         return false;
 
+    vector<Point2f> pnts2f;
+    if (!detectSingle(inarr, pnts2f))
+    {
+        // Fallback: white modules on a dark background.
+        if (!detectSingle(invertQRImage(inarr), pnts2f))
+            return false;
+    }
+    updatePointsResult(points, pnts2f);
+    return true;
+}
+
+bool ImplContour::detectSingle(const Mat& inarr, vector<Point2f>& pnts2f) const
+{
     QRDetect qrdet;
     qrdet.init(inarr, epsX, epsY);
     if (!qrdet.localization()) { return false; }
     if (!qrdet.computeTransformationPoints()) { return false; }
-    vector<Point2f> pnts2f = qrdet.getTransformationPoints();
-    updatePointsResult(points, pnts2f);
+    pnts2f = qrdet.getTransformationPoints();
     return true;
 }
 
@@ -2953,6 +2978,17 @@ std::string ImplContour::decode(InputArray in, InputArray points, OutputArray st
     CV_Assert(src_points.size() == 4);
     CV_CheckGT(contourArea(src_points), 0.0, "Invalid QR code source points");
 
+    std::string res = decodeSingle(inarr, src_points, straight_qrcode);
+    if (res.empty())
+    {
+        // Fallback: white modules on a dark background.
+        res = decodeSingle(invertQRImage(inarr), src_points, straight_qrcode);
+    }
+    return res;
+}
+
+std::string ImplContour::decodeSingle(const Mat& inarr, const vector<Point2f>& src_points,
+                                      OutputArray straight_qrcode) const {
     QRDecode qrdec(useAlignmentMarkers);
     qrdec.init(inarr, src_points);
     bool ok = qrdec.straightDecodingProcess();
@@ -3024,8 +3060,24 @@ std::string ImplContour::detectAndDecode(InputArray in, OutputArray points_, Out
         points_.release();
         return std::string();
     }
-    updatePointsResult(points_, points);
     std::string decoded_info = decode(inarr, points, straight_qrcode);
+    if (decoded_info.empty())
+    {
+        // Fallback: detect and decode the polarity-inverted image. A spurious detection
+        // in the normal polarity must not prevent reading a white-on-black code.
+        vector<Point2f> inv_points;
+        Mat inverted = invertQRImage(inarr);
+        if (detect(inverted, inv_points))
+        {
+            std::string inv_info = decode(inverted, inv_points, straight_qrcode);
+            if (!inv_info.empty())
+            {
+                updatePointsResult(points_, inv_points);
+                return inv_info;
+            }
+        }
+    }
+    updatePointsResult(points_, points);
     return decoded_info;
 }
 
@@ -3993,21 +4045,29 @@ bool ImplContour::detectMulti(InputArray in, OutputArray points) const {
         return false;
     }
     vector<Point2f> result;
+    if (!detectMultiSingle(gray, result))
+    {
+        // Fallback: white modules on a dark background.
+        result.clear();
+        if (!detectMultiSingle(invertQRImage(gray), result)) {
+            points.release();
+            return false;
+        }
+    }
+    updatePointsResult(points, result);
+    return true;
+}
+
+bool ImplContour::detectMultiSingle(const Mat& gray, vector<Point2f>& result) const {
     QRDetectMulti qrdet;
     qrdet.init(gray, epsX, epsY);
-    if (!qrdet.localization()) {
-        points.release();
+    if (!qrdet.localization())
         return false;
-    }
     vector<vector<Point2f> > pnts2f = qrdet.getTransformationPoints();
     for(size_t i = 0; i < pnts2f.size(); i++)
         for(size_t j = 0; j < pnts2f[i].size(); j++)
             result.push_back(pnts2f[i][j]);
-    if (result.size() >= 4) {
-        updatePointsResult(points, result);
-        return true;
-    }
-    return false;
+    return result.size() >= 4;
 }
 
 class ParallelDecodeProcess : public ParallelLoopBody
@@ -4096,7 +4156,36 @@ bool ImplContour::decodeMulti(
     vector<Mat> straight_barcode(src_points.size());
     vector<std::string> info(src_points.size());
     ParallelDecodeProcess parallelDecodeProcess(inarr, qrdec, info, straight_barcode, src_points);
+    vector< vector< Point2f > > orig_points = src_points;
     parallel_for_(Range(0, int(src_points.size())), parallelDecodeProcess);
+
+    // Fallback: retry codes that failed to decode on the polarity-inverted image.
+    vector<size_t> failed;
+    for (size_t i = 0; i < info.size(); i++)
+        if (info[i].empty() && straight_barcode[i].empty())
+            failed.push_back(i);
+    if (!failed.empty())
+    {
+        Mat inverted = invertQRImage(inarr);
+        vector<QRDecode> sub_qrdec(failed.size(), useAlignmentMarkers);
+        vector<Mat> sub_straight(failed.size());
+        vector<std::string> sub_info(failed.size());
+        vector< vector< Point2f > > sub_points;
+        for (size_t k : failed)
+            sub_points.push_back(orig_points[k]);
+        ParallelDecodeProcess retryProcess(inverted, sub_qrdec, sub_info, sub_straight, sub_points);
+        parallel_for_(Range(0, int(failed.size())), retryProcess);
+        for (size_t n = 0; n < failed.size(); n++)
+        {
+            if (sub_info[n].empty() && sub_straight[n].empty())
+                continue;
+            const size_t k = failed[n];
+            qrdec[k] = sub_qrdec[n];
+            info[k] = sub_info[n];
+            straight_barcode[k] = sub_straight[n];
+            src_points[k] = sub_points[n];
+        }
+    }
     vector<Mat> for_copy;
     for (size_t i = 0; i < straight_barcode.size(); i++)
     {
@@ -4192,9 +4281,27 @@ bool ImplContour::detectAndDecodeMulti(
         points_.release();
         return false;
     }
-    updatePointsResult(points_, points);
     decoded_info.clear();
     ok = decodeMulti(inarr, points, decoded_info, straight_qrcode);
+    auto nonEmpty = [](const cv::String& str) { return !str.empty(); };
+    if (!std::any_of(decoded_info.begin(), decoded_info.end(), nonEmpty))
+    {
+        // Fallback: detect and decode the polarity-inverted image. A spurious detection in
+        // the normal polarity must not prevent reading white-on-black codes.
+        vector<Point2f> inv_points;
+        vector<cv::String> inv_info;
+        if (detectMulti(invertQRImage(inarr), inv_points) &&
+            decodeMulti(inarr, inv_points, inv_info, straight_qrcode) &&
+            std::any_of(inv_info.begin(), inv_info.end(), nonEmpty))
+        {
+            decoded_info = inv_info;
+            updatePointsResult(points_, updateQrCorners);
+            return true;
+        }
+        // Keep first-pass results (and restore decoder state of that pass).
+        decoded_info.clear();
+        ok = decodeMulti(inarr, points, decoded_info, straight_qrcode);
+    }
     updatePointsResult(points_, updateQrCorners);
     return ok;
 }
@@ -4640,6 +4747,21 @@ struct PimplQRAruco : public ImplContour {
         arucoDetector = aruco::ArucoDetector(dictionary, arucoParams);
     }
 
+    bool detectMultiSingle(const Mat& gray, vector<Point2f>& result) const {
+        vector<vector<Point2f> > corners;
+        vector<int> ids;
+        arucoDetector.detectMarkers(gray, corners, ids);
+        if (corners.size() >= 3ull) {
+            vector<QRCode> qrCodes = analyzeFinderPatterns(corners, gray.clone(), qrParams);
+            for (auto& qr : qrCodes) {
+                for (Point2f& corner : qr.getQRCorners()) {
+                    result.push_back(corner);
+                }
+            }
+        }
+        return result.size() >= 4;
+    }
+
     bool detectMulti(InputArray in, OutputArray points) const override {
         Mat gray;
         if (!checkQRInputImage(in, gray)) {
@@ -4647,24 +4769,14 @@ struct PimplQRAruco : public ImplContour {
             return false;
         }
         vector<Point2f> result;
-        vector<vector<Point2f> > corners;
-        vector<int> ids;
-        arucoDetector.detectMarkers(gray, corners, ids);
-        if (corners.size() >= 3ull) {
-            vector<QRCode> qrCodes = analyzeFinderPatterns(corners, gray.clone(), qrParams);
-            if (qrCodes.size() == 0ull)
+        if (!detectMultiSingle(gray, result)) {
+            // Fallback: white modules on a dark background.
+            result.clear();
+            if (!detectMultiSingle(invertQRImage(gray), result))
                 return false;
-            for (auto& qr : qrCodes) {
-                for (Point2f& corner : qr.getQRCorners()) {
-                    result.push_back(corner);
-                }
-            }
         }
-        if (result.size() >= 4) {
-            updatePointsResult(points, result);
-            return true;
-        }
-        return false;
+        updatePointsResult(points, result);
+        return true;
     }
 
     bool detect(InputArray img, OutputArray points) const override {
