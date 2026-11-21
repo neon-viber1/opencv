@@ -954,6 +954,109 @@ TEST(Calib3d_CornerOrdering, issue_26830) {
     ASSERT_EQ(cornersMinimumSizeMatchesPatternSize, cornersMinimumSizeSmallerThanPatternSize);
 }
 
+// Low-resolution boards with strong radial distortion, low contrast and an uneven illumination.
+// The detection must not accept corners that are matched across neighbouring quads from
+// different squares, nor extrapolated from over-dilated quads: the corners have to be accurate.
+// Renders a 224x172 chessboard with perspective, radial (barrel) distortion, reduced contrast,
+// an illumination gradient, blur and noise. Returns the ground truth corners.
+static Mat renderDistortedBoard(Size patternSize, uint64 seed, std::vector<Point2f>& gt)
+{
+    RNG rng(seed);
+    const int W = 224, H = 172, S = 20;
+    const double k1 = rng.uniform(0.0, 0.7), persp = rng.uniform(0.0, 0.06);
+    const double blur = rng.uniform(0.8, 2.0), noise = rng.uniform(1.0, 10.0);
+    const double scale = rng.uniform(0.5, 0.8);
+    const Point2d shift(rng.uniform(-8., 8.), rng.uniform(-8., 8.));
+    const float lo = (float)rng.uniform(0., 60.), hi = (float)rng.uniform(170., 255.);
+    const float gradX = (float)rng.uniform(-60., 60.), gradY = (float)rng.uniform(-60., 60.);
+
+    const int cols = patternSize.width + 1, rows = patternSize.height + 1;
+    Mat board((rows + 2) * S, (cols + 2) * S, CV_8U, Scalar(255));
+    for (int y = 0; y < rows; y++)
+        for (int x = 0; x < cols; x++)
+            if ((x + y) % 2 == 0)
+                rectangle(board, Rect((x + 1) * S, (y + 1) * S, S, S), Scalar(0), FILLED);
+
+    const double bw = scale * W, bh = bw * board.rows / board.cols;
+    const Point2d c(W / 2., H / 2.);
+    const Point2d ctr = c + shift;
+    std::vector<Point2f> src = { {0, 0}, {(float)board.cols, 0}, {(float)board.cols, (float)board.rows}, {0, (float)board.rows} };
+    std::vector<Point2f> dst(4);
+    const Point2d sgn[4] = { {-1, -1}, {1, -1}, {1, 1}, {-1, 1} };
+    for (int i = 0; i < 4; i++)
+        dst[i] = Point2f((float)(ctr.x + sgn[i].x * bw / 2 + persp * rng.uniform(-1., 1.) * bw),
+                         (float)(ctr.y + sgn[i].y * bh / 2 + persp * rng.uniform(-1., 1.) * bh));
+    const Mat Hm = getPerspectiveTransform(src, dst);
+    const Mat Hinv = Hm.inv();
+
+    const double f = W;
+    Mat mapx(H, W, CV_32F), mapy(H, W, CV_32F);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+        {
+            Point2d p((x - c.x) / f, (y - c.y) / f);
+            Point2d u = p * (1 + k1 * p.dot(p)) * f + c;
+            std::vector<Point2f> in(1, Point2f((float)u.x, (float)u.y)), out;
+            perspectiveTransform(in, out, Hinv);
+            mapx.at<float>(y, x) = out[0].x;
+            mapy.at<float>(y, x) = out[0].y;
+        }
+    Mat img;
+    remap(board, img, mapx, mapy, INTER_AREA, BORDER_CONSTANT, Scalar(255));
+
+    gt.clear();
+    for (int y = 0; y < patternSize.height; y++)
+        for (int x = 0; x < patternSize.width; x++)
+        {
+            std::vector<Point2f> in(1, Point2f((float)((x + 2) * S), (float)((y + 2) * S))), out;
+            perspectiveTransform(in, out, Hm);
+            const Point2d u((out[0].x - c.x) / f, (out[0].y - c.y) / f);
+            Point2d p = u;
+            for (int it = 0; it < 50; it++)  // invert the radial distortion
+                p = u * (1.0 / (1 + k1 * p.dot(p)));
+            gt.push_back(Point2f((float)(p.x * f + c.x), (float)(p.y * f + c.y)));
+        }
+
+    Mat fimg;
+    img.convertTo(fimg, CV_32F);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+            fimg.at<float>(y, x) = fimg.at<float>(y, x) * (hi - lo) / 255.f + lo
+                                   + gradX * (x - W / 2) / W + gradY * (y - H / 2) / H;
+    GaussianBlur(fimg, fimg, Size(), blur);
+    Mat noiseImg(fimg.size(), CV_32F);
+    rng.fill(noiseImg, RNG::NORMAL, 0, noise);
+    fimg += noiseImg;
+    Mat result;
+    fimg.convertTo(result, CV_8U);
+    return result;
+}
+
+typedef testing::TestWithParam<int> Calib3d_ChessboardDistorted;
+
+TEST_P(Calib3d_ChessboardDistorted, accuracy_issue_27885)
+{
+    const Size patternSize(6, 4);
+    std::vector<Point2f> expected, corners;
+    const Mat image = renderDistortedBoard(patternSize, GetParam(), expected);
+
+    const bool found = findChessboardCorners(image, patternSize, corners,
+                                             CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_NORMALIZE_IMAGE);
+    ASSERT_TRUE(found);
+    ASSERT_EQ((size_t)patternSize.area(), corners.size());
+
+    // the corner order depends on the board orientation: accept the reversed one
+    double errStraight = 0, errReversed = 0;
+    for (size_t i = 0; i < corners.size(); i++)
+    {
+        errStraight = std::max(errStraight, cv::norm(corners[i] - expected[i]));
+        errReversed = std::max(errReversed, cv::norm(corners[i] - expected[corners.size() - 1 - i]));
+    }
+    EXPECT_LE(std::min(errStraight, errReversed), 2.5);
+}
+
+INSTANTIATE_TEST_CASE_P(/**/, Calib3d_ChessboardDistorted, testing::Values(40, 161, 515, 535));
+
 // findChessboardCorners() falls back to checkChessboard() under CALIB_CB_FAST_CHECK
 // (calibinit.cpp), so a false negative here costs a detection.
 //

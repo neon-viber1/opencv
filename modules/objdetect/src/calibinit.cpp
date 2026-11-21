@@ -222,7 +222,7 @@ public:
     int all_quads_count;
 
     struct NeighborsFinder {
-        const float thresh_sqr_scale = 2.f;
+        const float thresh_sqr_scale = 1.f;
         ChessBoardDetector& detector;
         std::vector<int> neighbors_indices;
         std::vector<float> neighbors_dists;
@@ -255,7 +255,7 @@ public:
         all_quads_count = 0;
     }
 
-    void generateQuads(const Mat& image_, int flags, int dilations);
+    void generateQuads(const Mat& image_, int flags);
 
     bool processQuads(std::vector<Point2f>& out_corners, int &prev_sqr_size);
 
@@ -720,7 +720,7 @@ bool findChessboardCorners(InputArray image_, Size pattern_size,
         rectangle( thresh_img_new, Point(0,0), Point(thresh_img_new.cols-1, thresh_img_new.rows-1), Scalar(255,255,255), 3, LINE_8);
 
         detector.reset();
-        detector.generateQuads(thresh_img_new, flags, dilations);
+        detector.generateQuads(thresh_img_new, flags);
         DPRINTF("Quad count: %d/%d", detector.all_quads_count, (pattern_size.width/2+1)*(pattern_size.height/2+1));
         SHOW_QUADS("New quads", thresh_img_new, &detector.all_quads[0], detector.all_quads_count);
         if (detector.processQuads(out_corners, prev_sqr_size))
@@ -796,7 +796,7 @@ bool findChessboardCorners(InputArray image_, Size pattern_size,
                 rectangle( thresh_img, Point(0,0), Point(thresh_img.cols-1, thresh_img.rows-1), Scalar(255,255,255), 3, LINE_8);
 
                 detector.reset();
-                detector.generateQuads(thresh_img, flags, dilations);
+                detector.generateQuads(thresh_img, flags);
                 DPRINTF("Quad count: %d/%d", detector.all_quads_count, (pattern_size.width/2+1)*(pattern_size.height/2+1));
                 SHOW_QUADS("Old quads", thresh_img, &detector.all_quads[0], detector.all_quads_count);
                 if (detector.processQuads(out_corners, prev_sqr_size))
@@ -1194,32 +1194,29 @@ int ChessBoardDetector::addOuterQuad(ChessBoardQuad& quad, std::vector<ChessBoar
             case 1:
                 q.col = quad.col + 1; q.row = quad.row - 1; break;
             case 2:
-                q.col = quad.col + 1; q.row = quad.row - 1; break;
+                q.col = quad.col + 1; q.row = quad.row + 1; break;
             case 3:
                 q.col = quad.col - 1; q.row = quad.row + 1; break;
             }
 
             // now find other neighbor and add it, if possible
-            for (int k = 1; k <= 3; k += 2)
+            const int next_i = (i + 1) & 3;
+            const int prev_i = (i + 3) & 3; // equal to (j + 1) & 3
+            ChessBoardQuad* quad_prev = quad.neighbors[prev_i];
+            if (quad_prev &&
+                quad_prev->ordered &&
+                quad_prev->neighbors[i] &&
+                quad_prev->neighbors[i]->ordered &&
+                std::abs(quad_prev->neighbors[i]->col - q.col) == 1 &&
+                std::abs(quad_prev->neighbors[i]->row - q.row) == 1)
             {
-                int next_i = (i + k) % 4;
-                int prev_i = (i + k + 2) % 4;
-                ChessBoardQuad* quad_prev = quad.neighbors[prev_i];
-                if (quad_prev &&
-                    quad_prev->ordered &&
-                    quad_prev->neighbors[i] &&
-                    quad_prev->neighbors[i]->ordered &&
-                    std::abs(quad_prev->neighbors[i]->col - q.col) == 1 &&
-                    std::abs(quad_prev->neighbors[i]->row - q.row) == 1)
-                {
-                    ChessBoardQuad* qn = quad_prev->neighbors[i];
-                    q.count = 2;
-                    q.neighbors[prev_i] = qn;
-                    qn->neighbors[next_i] = &q;
-                    qn->count += 1;
-                    // have to set exact corner
-                    q.corners[prev_i] = qn->corners[next_i];
-                }
+                ChessBoardQuad* qn = quad_prev->neighbors[i];
+                q.count = 2;
+                q.neighbors[prev_i] = qn;
+                qn->neighbors[next_i] = &q;
+                qn->count += 1;
+                // have to set exact corner
+                q.corners[prev_i] = qn->corners[next_i];
             }
         }
     }
@@ -1883,7 +1880,7 @@ void ChessBoardDetector::findQuadNeighbors()
 // returns corners in clockwise order
 // corners don't necessarily start at same position on quad (e.g.,
 //   top left corner)
-void ChessBoardDetector::generateQuads(const Mat& image_, int flags, int dilations)
+void ChessBoardDetector::generateQuads(const Mat& image_, int flags)
 {
     binarized_image = image_;  // save for debug purposes
 
@@ -1998,9 +1995,6 @@ void ChessBoardDetector::generateQuads(const Mat& image_, int flags, int dilatio
             float sqr_d = normL2Sqr<float>(q.corners[i]->pt - q.corners[(i+1)&3]->pt);
             q.edge_sqr_len = std::min(q.edge_sqr_len, sqr_d);
         }
-
-        const int edge_len_compensation = 2 * dilations;
-        q.edge_sqr_len += 2 * sqrt(q.edge_sqr_len) * edge_len_compensation + edge_len_compensation * edge_len_compensation;
     }
 
     all_quads_count = quad_count;
