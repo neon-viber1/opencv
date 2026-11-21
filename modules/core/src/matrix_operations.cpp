@@ -678,6 +678,198 @@ REDUCE_OP(32f, Min, float, float)
 #define reduceMinC8s  reduceC_<schar, schar, OpMin<schar> >
 #define reduceMinC32s reduceC_<int,   int,   OpMin<int> >
 
+
+namespace cv
+{
+
+// Generic reduce kernels for the source depths without dedicated rows:
+// CV_8S, CV_32S, CV_32U, CV_64U, CV_64S, CV_16F, CV_16BF, CV_Bool.
+// The accumulation is done in a wide type (int64/uint64/double) so sums do not wrap;
+// the result is converted (with saturation) to the destination depth afterwards.
+enum { GEN_SUM = 0, GEN_SUM2 = 1, GEN_MAX = 2, GEN_MIN = 3 };
+
+template<typename T, typename WT> static inline WT genLoad(const T& v) { return (WT)v; }
+template<> inline double genLoad<hfloat, double>(const hfloat& v) { return (double)(float)v; }
+template<> inline double genLoad<bfloat, double>(const bfloat& v) { return (double)(float)v; }
+template<> inline float genLoad<hfloat, float>(const hfloat& v) { return (float)v; }
+template<> inline float genLoad<bfloat, float>(const bfloat& v) { return (float)v; }
+
+// 64-bit integer accumulation saturates instead of wrapping
+template<typename WT> static inline WT genAdd(WT a, WT b) { return a + b; }
+template<> inline int64_t genAdd<int64_t>(int64_t a, int64_t b)
+{
+    if (b > 0 && a > INT64_MAX - b) return INT64_MAX;
+    if (b < 0 && a < INT64_MIN - b) return INT64_MIN;
+    return a + b;
+}
+template<> inline uint64_t genAdd<uint64_t>(uint64_t a, uint64_t b)
+{
+    return a > UINT64_MAX - b ? UINT64_MAX : a + b;
+}
+
+template<typename WT, int OP> static inline WT genStep(WT acc, WT v)
+{
+    if (OP == GEN_SUM) return genAdd<WT>(acc, v);
+    if (OP == GEN_SUM2) return acc + v*v;
+    if (OP == GEN_MAX) return acc < v ? v : acc;
+    return v < acc ? v : acc;
+}
+
+template<typename WT, int OP> static inline WT genFirst(WT v)
+{
+    return OP == GEN_SUM2 ? v*v : v;
+}
+
+// T - source element type, WT - accumulator type, AT - stored type of the temporary result
+template<typename T, typename WT, typename AT, int OP>
+static void reduceGen(const Mat& src, Mat& dst, int dim)
+{
+    const int cn = src.channels();
+    if (dim == 0)
+    {
+        const int width = src.cols*cn;
+        parallel_for_(Range(0, width), [&](const Range& r)
+        {
+            AutoBuffer<WT> buf(r.end - r.start);
+            WT* b = buf.data();
+            const T* s = src.ptr<T>();
+            for (int i = r.start; i < r.end; i++)
+                b[i - r.start] = genFirst<WT, OP>(genLoad<T, WT>(s[i]));
+            for (int y = 1; y < src.rows; y++)
+            {
+                s = src.ptr<T>(y);
+                for (int i = r.start; i < r.end; i++)
+                    b[i - r.start] = genStep<WT, OP>(b[i - r.start], genLoad<T, WT>(s[i]));
+            }
+            AT* d = dst.ptr<AT>();
+            for (int i = r.start; i < r.end; i++)
+                d[i] = (AT)b[i - r.start];
+        });
+    }
+    else
+    {
+        parallel_for_(Range(0, src.rows), [&](const Range& r)
+        {
+            AutoBuffer<WT> buf(cn);
+            WT* b = buf.data();
+            for (int y = r.start; y < r.end; y++)
+            {
+                const T* s = src.ptr<T>(y);
+                for (int c = 0; c < cn; c++)
+                    b[c] = genFirst<WT, OP>(genLoad<T, WT>(s[c]));
+                for (int x = cn; x < src.cols*cn; x += cn)
+                    for (int c = 0; c < cn; c++)
+                        b[c] = genStep<WT, OP>(b[c], genLoad<T, WT>(s[x + c]));
+                AT* d = dst.ptr<AT>(y);
+                for (int c = 0; c < cn; c++)
+                    d[c] = (AT)b[c];
+            }
+        });
+    }
+}
+
+typedef void (*GenReduceFunc)(const Mat&, Mat&, int);
+
+template<typename T, typename WT, typename AT>
+static GenReduceFunc genPick(int op)
+{
+    return op == GEN_SUM ? reduceGen<T, WT, AT, GEN_SUM> : op == GEN_SUM2 ? reduceGen<T, WT, AT, GEN_SUM2> :
+           op == GEN_MAX ? reduceGen<T, WT, AT, GEN_MAX> : reduceGen<T, WT, AT, GEN_MIN>;
+}
+
+static bool isGenericReduceDepth(int sdepth)
+{
+    return sdepth == CV_8S || sdepth == CV_32S || sdepth == CV_32U || sdepth == CV_64U ||
+           sdepth == CV_64S || sdepth == CV_16F || sdepth == CV_16BF || sdepth == CV_Bool;
+}
+
+static bool isFloatDepth(int d) { return d == CV_16F || d == CV_16BF || d == CV_32F || d == CV_64F; }
+
+// Returns false if the (sdepth, op, ddepth) combination is not handled.
+// dst must already be allocated with the final depth/size.
+static bool reduceGeneric(const Mat& src, Mat& dst, int dim, int op0)
+{
+    const int sdepth = src.depth(), ddepth = dst.depth(), cn = src.channels();
+    if (!isGenericReduceDepth(sdepth))
+        return false;
+    const bool isMinMax = op0 == REDUCE_MAX || op0 == REDUCE_MIN;
+    if (isMinMax && sdepth != ddepth)
+        return false;
+    const int gop = op0 == REDUCE_MAX ? GEN_MAX : op0 == REDUCE_MIN ? GEN_MIN :
+                    op0 == REDUCE_SUM2 ? GEN_SUM2 : GEN_SUM;
+
+    GenReduceFunc f = 0;
+    int tdepth = CV_64F;  // depth of the temporary result
+    if (isMinMax)
+    {
+        tdepth = sdepth;
+        switch (sdepth)
+        {
+        case CV_8S:   f = genPick<schar, schar, schar>(gop); break;
+        case CV_32S:  f = genPick<int, int, int>(gop); break;
+        case CV_32U:  f = genPick<unsigned, unsigned, unsigned>(gop); break;
+        case CV_64U:  f = genPick<uint64_t, uint64_t, uint64_t>(gop); break;
+        case CV_64S:  f = genPick<int64_t, int64_t, int64_t>(gop); break;
+        case CV_16F:  f = genPick<hfloat, float, hfloat>(gop); break;
+        case CV_16BF: f = genPick<bfloat, float, bfloat>(gop); break;
+        case CV_Bool: f = genPick<bool, int, bool>(gop); break;
+        }
+    }
+    else
+    {
+        const bool fl = isFloatDepth(ddepth);
+        const bool sq = gop == GEN_SUM2;
+        switch (sdepth)
+        {
+        // exact integer accumulation (squares of 8S/Bool still fit)
+        case CV_8S:   tdepth = fl ? CV_64F : CV_64S; f = fl ? genPick<schar, double, double>(gop) : genPick<schar, int64_t, int64_t>(gop); break;
+        case CV_Bool: tdepth = fl ? CV_64F : CV_64S; f = fl ? genPick<bool, double, double>(gop) : genPick<bool, int64_t, int64_t>(gop); break;
+        case CV_32S:
+            if (fl || sq) { tdepth = CV_64F; f = genPick<int, double, double>(gop); }
+            else { tdepth = CV_64S; f = genPick<int, int64_t, int64_t>(gop); }
+            break;
+        case CV_32U:
+            if (fl || sq) { tdepth = CV_64F; f = genPick<unsigned, double, double>(gop); }
+            else { tdepth = CV_64S; f = genPick<unsigned, int64_t, int64_t>(gop); }
+            break;
+        case CV_64S:
+            if (fl || sq) { tdepth = CV_64F; f = genPick<int64_t, double, double>(gop); }
+            else { tdepth = CV_64S; f = genPick<int64_t, int64_t, int64_t>(gop); }
+            break;
+        case CV_64U:
+            if (fl || sq) { tdepth = CV_64F; f = genPick<uint64_t, double, double>(gop); }
+            else { tdepth = CV_64U; f = genPick<uint64_t, uint64_t, uint64_t>(gop); }
+            break;
+        case CV_16F:  tdepth = CV_64F; f = genPick<hfloat, double, double>(gop); break;
+        case CV_16BF: tdepth = CV_64F; f = genPick<bfloat, double, double>(gop); break;
+        }
+    }
+    if (!f)
+        return false;
+
+    const double scale = op0 == REDUCE_AVG ? 1./(dim == 0 ? src.rows : src.cols) : 1.;
+    if (tdepth == ddepth && scale == 1.)
+    {
+        f(src, dst, dim);
+    }
+    else
+    {
+        Mat tmp(dst.rows, dst.cols, CV_MAKETYPE(tdepth, cn));
+        f(src, tmp, dim);
+        if (scale != 1. && tdepth != CV_64F)
+        {
+            // scale in double precision, not in the float arithmetic of integer conversions
+            Mat tmpd;
+            tmp.convertTo(tmpd, CV_64F);
+            tmp = tmpd;
+        }
+        tmp.convertTo(dst, dst.type(), scale);
+    }
+    return true;
+}
+
+}
+
 #ifdef HAVE_OPENCL
 
 namespace cv {
@@ -693,6 +885,9 @@ static bool ocl_reduce(InputArray _src, OutputArray _dst,
 
     size_t wgs = defDev.maxWorkGroupSize();
     bool useOptimized = 1 == dim && _src.cols() > min_opt_cols && (wgs >= buf_cols);
+
+    if (sdepth > CV_64F || ddepth > CV_64F)
+        return false;
 
     if (!doubleSupport && (sdepth == CV_64F || ddepth == CV_64F))
         return false;
@@ -1048,6 +1243,9 @@ void cv::reduce(InputArray _src, OutputArray _dst, int dim, int op, int dtype)
                 func = reduceSum2C32s64f;
         }
     }
+
+    if( !func && reduceGeneric(src, dst, dim, op0) )
+        return;
 
     if( !func )
         CV_Error( cv::Error::StsUnsupportedFormat,

@@ -1237,6 +1237,128 @@ TEST(Core_Reduce, int8_signed_extremes)
         EXPECT_EQ(-128, res.at<schar>(0, 0));
     }
 }
+
+// Sweep every source depth against a double-precision reference.
+TEST(Core_Reduce, all_depths_sweep)
+{
+    const int depths[] = { CV_8U, CV_8S, CV_16U, CV_16S, CV_32S, CV_32F, CV_64F,
+                           CV_16F, CV_16BF, CV_Bool, CV_64U, CV_64S, CV_32U };
+    const int ops[] = { cv::REDUCE_SUM, cv::REDUCE_AVG, cv::REDUCE_MAX, cv::REDUCE_MIN, cv::REDUCE_SUM2 };
+    cv::RNG rng(12345);
+    for (int depth : depths)
+    for (int cn = 1; cn <= 3; cn += 2)
+    for (int op : ops)
+    for (int dim = 0; dim <= 1; dim++)
+    {
+        SCOPED_TRACE(cv::format("depth=%d cn=%d op=%d dim=%d", depth, cn, op, dim));
+        const int rows = 5, cols = 7;
+        cv::Mat src(rows, cols, CV_MAKETYPE(depth, cn));
+        cv::randu(src, 0, 2);   // small non-negative values, representable everywhere
+        cv::Mat src64;
+        src.reshape(1).convertTo(src64, CV_64F);
+        src64 = src64.reshape(cn, rows);
+
+        const bool minmax = op == cv::REDUCE_MAX || op == cv::REDUCE_MIN;
+        const int ddepth = minmax ? depth : CV_64F;
+        cv::Mat dst;
+        cv::reduce(src, dst, dim, op, ddepth);
+        ASSERT_EQ(dim == 0 ? 1 : rows, dst.rows);
+        ASSERT_EQ(dim == 0 ? cols : 1, dst.cols);
+        cv::Mat dst64;
+        dst.reshape(1).convertTo(dst64, CV_64F);
+
+        const int n = dim == 0 ? rows : cols, m = dim == 0 ? cols : rows;
+        for (int i = 0; i < m; i++)
+            for (int c = 0; c < cn; c++)
+            {
+                double acc = 0, mx = -1e300, mn = 1e300;
+                for (int k = 0; k < n; k++)
+                {
+                    const int r = dim == 0 ? k : i, q = dim == 0 ? i : k;
+                    double v = src64.ptr<double>(r)[q*cn + c];
+                    acc += op == cv::REDUCE_SUM2 ? v*v : v;
+                    mx = std::max(mx, v); mn = std::min(mn, v);
+                }
+                double ref = op == cv::REDUCE_AVG ? acc/n : op == cv::REDUCE_MAX ? mx :
+                             op == cv::REDUCE_MIN ? mn : acc;
+                const double got = dst64.ptr<double>(dim == 0 ? 0 : i)[(dim == 0 ? i : 0)*cn + c];
+                ASSERT_NEAR(ref, got, 1e-9);
+            }
+    }
+}
+
+TEST(Core_Reduce, wide_accumulators_do_not_wrap)
+{
+    for (int dim = 0; dim <= 1; dim++)
+    {
+        SCOPED_TRACE(cv::format("dim=%d", dim));
+        const int n = 8;
+        auto make = [&](int type, const cv::Scalar& v) {
+            return dim == 0 ? cv::Mat(n, 1, type, v) : cv::Mat(1, n, type, v); };
+        cv::Mat res;
+
+        // issue reproducer
+        cv::reduce(cv::Mat(8, 8, CV_32SC1, cv::Scalar(1)), res, dim, cv::REDUCE_SUM, CV_64F);
+        EXPECT_EQ(8.0, res.at<double>(0, 0));
+
+        // CV_32S -> CV_32S saturates instead of wrapping
+        cv::reduce(make(CV_32SC1, cv::Scalar(INT_MAX)), res, dim, cv::REDUCE_SUM, CV_32S);
+        EXPECT_EQ(INT_MAX, res.at<int>(0, 0));
+        cv::reduce(make(CV_32SC1, cv::Scalar(INT_MIN)), res, dim, cv::REDUCE_SUM, CV_32S);
+        EXPECT_EQ(INT_MIN, res.at<int>(0, 0));
+        cv::reduce(make(CV_32SC1, cv::Scalar(INT_MAX)), res, dim, cv::REDUCE_AVG, CV_32S);
+        EXPECT_EQ(INT_MAX, res.at<int>(0, 0));
+
+        // CV_32U
+        cv::reduce(make(CV_32UC1, cv::Scalar(4294967295.0)), res, dim, cv::REDUCE_SUM, CV_64F);
+        EXPECT_DOUBLE_EQ(4294967295.0 * n, res.at<double>(0, 0));
+        cv::reduce(make(CV_32UC1, cv::Scalar(4294967295.0)), res, dim, cv::REDUCE_SUM, CV_64S);
+        EXPECT_EQ((int64_t)4294967295LL * n, res.at<int64_t>(0, 0));
+
+        // CV_64S / CV_64U with 2^62
+        const int64_t big = (int64_t)1 << 62;
+        cv::Mat s64 = make(CV_64SC1, cv::Scalar::all(0));
+        s64.setTo(cv::Scalar((double)big));
+        cv::reduce(s64, res, dim, cv::REDUCE_SUM, CV_64F);
+        EXPECT_DOUBLE_EQ((double)big * n, res.at<double>(0, 0));
+        cv::reduce(s64, res, dim, cv::REDUCE_SUM, CV_64S);
+        EXPECT_EQ(INT64_MAX, res.at<int64_t>(0, 0));
+        cv::reduce(s64, res, dim, cv::REDUCE_MAX, -1);
+        EXPECT_EQ(big, res.at<int64_t>(0, 0));
+        const uint64_t ubig = (uint64_t)1 << 60;
+        cv::Mat u64 = make(CV_64UC1, cv::Scalar::all(0));
+        for (int i = 0; i < n; i++)
+            u64.ptr<uint64_t>(dim == 0 ? i : 0)[dim == 0 ? 0 : i] = ubig;
+        cv::reduce(u64, res, dim, cv::REDUCE_SUM, CV_64U);
+        EXPECT_EQ(ubig * n, res.at<uint64_t>(0, 0));
+        cv::reduce(u64, res, dim, cv::REDUCE_SUM, CV_64F);
+        EXPECT_DOUBLE_EQ((double)ubig * n, res.at<double>(0, 0));
+        // 2^62 * 8 = 2^65 saturates
+        for (int i = 0; i < n; i++)
+            u64.ptr<uint64_t>(dim == 0 ? i : 0)[dim == 0 ? 0 : i] = (uint64_t)big;
+        cv::reduce(u64, res, dim, cv::REDUCE_SUM, CV_64U);
+        EXPECT_EQ(UINT64_MAX, res.at<uint64_t>(0, 0));
+
+        // CV_Bool counts 0/1
+        cv::Mat b = make(CV_BoolC1, cv::Scalar::all(0));
+        for (int i = 0; i < n; i += 2)
+            b.ptr<bool>(dim == 0 ? i : 0)[dim == 0 ? 0 : i] = true;
+        cv::reduce(b, res, dim, cv::REDUCE_SUM, CV_32S);
+        EXPECT_EQ(n/2, res.at<int>(0, 0));
+        cv::reduce(b, res, dim, cv::REDUCE_MAX, -1);
+        EXPECT_TRUE(res.at<bool>(0, 0));
+        cv::reduce(b, res, dim, cv::REDUCE_MIN, -1);
+        EXPECT_FALSE(res.at<bool>(0, 0));
+
+        // CV_8S negatives
+        cv::reduce(make(CV_8SC1, cv::Scalar(-100)), res, dim, cv::REDUCE_SUM, CV_32S);
+        EXPECT_EQ(-100*n, res.at<int>(0, 0));
+
+        // MAX/MIN still require ddepth == sdepth
+        EXPECT_THROW(cv::reduce(make(CV_32SC1, cv::Scalar(1)), res, dim, cv::REDUCE_MAX, CV_64F), cv::Exception);
+    }
+}
+
 TEST(Core_Array, basic_operations) { Core_ArrayOpTest test; test.safe_run(); }
 
 TEST(Core_Merge, shape_operations) { Core_MergeTest test; test.safe_run(); }

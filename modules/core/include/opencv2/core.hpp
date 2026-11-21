@@ -896,6 +896,11 @@ raster image. In case of #REDUCE_MAX and #REDUCE_MIN, the output image should ha
 In case of #REDUCE_SUM, #REDUCE_SUM2 and #REDUCE_AVG, the output may have a larger element bit-depth to preserve accuracy.
 And multi-channel arrays are also supported in these two reduction modes.
 
+All depths are accepted as the source. For CV_8S, CV_32S, CV_32U, CV_64U, CV_64S, CV_16F, CV_16BF and
+CV_Bool the sums are accumulated in a wide type (64-bit integer, or double when the output is
+floating-point or for #REDUCE_SUM2 of 32/64-bit integers) so they do not wrap, and are then converted to
+the output depth with saturation. Sums into CV_64F are exact up to 2^53. CV_Bool elements count as 0/1.
+
 The following code demonstrates its usage for a single channel matrix.
 @snippet snippets/core_reduce.cpp example
 
