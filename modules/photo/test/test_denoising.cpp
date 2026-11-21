@@ -183,4 +183,47 @@ TEST(Photo_DenoisingGrayscaleMulti16bitL1, regression)
     EXPECT_MAT_NEAR(result_16u, expected, 1);
 }
 
+TEST(Photo_DenoisingROI, fastNlMeansDenoising_ignores_parent_pixels)
+{
+    Mat parent(150, 150, CV_8UC1);
+    randu(parent, 100, 140);
+    Rect roi(25, 25, 100, 100);
+    Mat srcRoi = parent(roi), srcClone = srcRoi.clone();
+    Mat dstRoi, dstClone;
+    fastNlMeansDenoising(srcRoi, dstRoi, 40.0f, 7, 21);
+    fastNlMeansDenoising(srcClone, dstClone, 40.0f, 7, 21);
+    EXPECT_EQ(0, cvtest::norm(dstRoi, dstClone, NORM_INF));
+}
+
+TEST(Photo_DenoisingROI, fastNlMeansDenoising_16u_L1)
+{
+    Mat parent(150, 150, CV_16UC1);
+    randu(parent, 30000, 30040);
+    Rect roi(25, 25, 100, 100);
+    Mat srcRoi = parent(roi), srcClone = srcRoi.clone();
+    Mat dstRoi, dstClone;
+    std::vector<float> h(1, 40.f);
+    fastNlMeansDenoising(srcRoi, dstRoi, h, 7, 21, NORM_L1);
+    fastNlMeansDenoising(srcClone, dstClone, h, 7, 21, NORM_L1);
+    EXPECT_EQ(0, cvtest::norm(dstRoi, dstClone, NORM_INF));
+}
+
+TEST(Photo_DenoisingROI, fastNlMeansDenoisingMulti_ignores_parent_pixels)
+{
+    const int n = 3;
+    Rect roi(25, 25, 100, 100);
+    vector<Mat> roiImgs(n), cloneImgs(n);
+    for (int i = 0; i < n; i++)
+    {
+        Mat parent(150, 150, CV_8UC1);
+        randu(parent, 100, 140);
+        roiImgs[i] = parent(roi);
+        cloneImgs[i] = roiImgs[i].clone();
+    }
+    Mat dstRoi, dstClone;
+    fastNlMeansDenoisingMulti(roiImgs, dstRoi, n / 2, n, 40.0f, 7, 21);
+    fastNlMeansDenoisingMulti(cloneImgs, dstClone, n / 2, n, 40.0f, 7, 21);
+    EXPECT_EQ(0, cvtest::norm(dstRoi, dstClone, NORM_INF));
+}
+
 }} // namespace
