@@ -2686,4 +2686,55 @@ TEST(Core_InputOutput, filestorage_32u_large_values)
     }
 }
 
+
+typedef testing::TestWithParam<std::string> Core_InputOutput_ReleaseReuse;
+
+TEST_P(Core_InputOutput_ReleaseReuse, release_and_reuse)
+{
+    const std::string ext = GetParam();
+    const int N = 1000;
+    cv::FileStorage fs;
+    std::string first;
+    for (int pass = 0; pass < 2; pass++)
+    {
+        ASSERT_TRUE(fs.open("out" + ext, cv::FileStorage::WRITE | cv::FileStorage::MEMORY));
+        for (int i = 0; i < N; i++)
+            fs << ("k" + std::to_string(i)) << i * 7;
+        fs << "m" << cv::Mat::eye(3, 3, CV_32F);
+        std::string out = fs.releaseAndGetString();
+        EXPECT_FALSE(fs.isOpened());
+        ASSERT_FALSE(out.empty());
+        if (pass == 0) first = out; else EXPECT_EQ(first, out);
+
+        fs.release();  // double release is harmless
+        ASSERT_TRUE(fs.open(out, cv::FileStorage::READ | cv::FileStorage::MEMORY));
+        EXPECT_EQ(35, (int)fs["k5"]);
+        cv::Mat m; fs["m"] >> m;
+        EXPECT_EQ(0, cvtest::norm(m, cv::Mat::eye(3, 3, CV_32F), cv::NORM_INF));
+        fs.release();
+        EXPECT_FALSE(fs.isOpened());
+    }
+}
+
+TEST_P(Core_InputOutput_ReleaseReuse, base64)
+{
+    const std::string ext = GetParam();
+    cv::Mat src(20, 20, CV_32FC1);
+    cv::randu(src, 0, 1);
+    cv::FileStorage fs;
+    for (int pass = 0; pass < 2; pass++)
+    {
+        ASSERT_TRUE(fs.open("out" + ext + "?base64", cv::FileStorage::WRITE | cv::FileStorage::MEMORY));
+        fs << "m" << src;
+        std::string out = fs.releaseAndGetString();
+        ASSERT_TRUE(fs.open(out, cv::FileStorage::READ | cv::FileStorage::MEMORY));
+        cv::Mat m; fs["m"] >> m;
+        EXPECT_EQ(0, cvtest::norm(m, src, cv::NORM_INF));
+        fs.release();
+    }
+}
+
+INSTANTIATE_TEST_CASE_P(/**/, Core_InputOutput_ReleaseReuse,
+    testing::Values(std::string(".yml"), std::string(".xml"), std::string(".json")));
+
 }} // namespace
