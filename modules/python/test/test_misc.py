@@ -1012,5 +1012,21 @@ class AlgorithmImplHit(NewOpenCVTests):
         res = cv.getDefaultAlgorithmHint()
         self.assertTrue(res is not None)
 
+class CvtColorUnsupportedDepth(NewOpenCVTests):
+    def test_float64_message(self):
+        img = np.random.rand(10, 10, 3)
+        self.assertEqual(img.dtype, np.float64)
+        with self.assertRaises(cv.error) as ctx:
+            cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+        msg = str(ctx.exception)
+        self.assertIn('CV_64F', msg)
+        self.assertIn('Supported depths for this conversion: CV_8U, CV_16U, CV_32F', msg)
+        self.assertIn('astype(np.float32)', msg)
+
+    def test_supported_dtypes(self):
+        img = np.random.rand(10, 10, 3)
+        self.assertEqual(cv.cvtColor(img.astype(np.float32), cv.COLOR_BGR2GRAY).shape, (10, 10))
+        self.assertEqual(cv.cvtColor((img * 255).astype(np.uint8), cv.COLOR_BGR2GRAY).shape, (10, 10))
+
 if __name__ == '__main__':
     NewOpenCVTests.bootstrap()

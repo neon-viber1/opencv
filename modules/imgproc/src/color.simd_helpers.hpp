@@ -53,9 +53,42 @@ template<typename _Tp> static inline void v_swap(_Tp& a, _Tp& b)
 };*/
 
 
+static inline const char* colorDepthName(int depth)
+{
+    switch (depth)
+    {
+    case CV_8U: return "CV_8U";
+    case CV_8S: return "CV_8S";
+    case CV_16U: return "CV_16U";
+    case CV_16S: return "CV_16S";
+    case CV_32S: return "CV_32S";
+    case CV_32F: return "CV_32F";
+    case CV_64F: return "CV_64F";
+    case CV_16F: return "CV_16F";
+    case CV_16BF: return "CV_16BF";
+    case CV_Bool: return "CV_Bool";
+    case CV_64U: return "CV_64U";
+    default: return NULL;
+    }
+}
+
+static inline std::string colorDepthToString(int depth)
+{
+    const char* name = colorDepthName(depth);
+    return name ? std::string(name) : cv::format("%d", depth);
+}
+
 template<int i0, int i1 = -1, int i2 = -1>
 struct Set
 {
+    // human-readable list of the members, generated from the same template arguments as contains()
+    static inline std::string str()
+    {
+        std::string res = colorDepthToString(i0);
+        if (i1 != -1) res += ", " + colorDepthToString(i1);
+        if (i2 != -1) res += ", " + colorDepthToString(i2);
+        return res;
+    }
     static inline bool contains(int i)
     {
         return (i == i0 || i == i1 || i == i2);
@@ -65,6 +98,10 @@ struct Set
 template<int i0, int i1>
 struct Set<i0, i1, -1>
 {
+    static inline std::string str()
+    {
+        return colorDepthToString(i0) + ", " + colorDepthToString(i1);
+    }
     static inline bool contains(int i)
     {
         return (i == i0 || i == i1);
@@ -74,6 +111,7 @@ struct Set<i0, i1, -1>
 template<int i0>
 struct Set<i0, -1, -1>
 {
+    static inline std::string str() { return colorDepthToString(i0); }
     static inline bool contains(int i)
     {
         return (i == i0);
@@ -97,7 +135,12 @@ struct CvtHelper
 
         CV_CheckChannels(scn, VScn::contains(scn), "Invalid number of channels in input image");
         CV_CheckChannels(dcn, VDcn::contains(dcn), "Invalid number of channels in output image");
-        CV_CheckDepth(depth, VDepth::contains(depth), "Unsupported depth of input image");
+        if (!VDepth::contains(depth))
+            CV_Error(cv::Error::StsUnsupportedFormat, cv::format(
+                "cvtColor: unsupported depth of input image: %s. Supported depths for this conversion: %s. "
+                "Convert the image to a supported depth before calling cvtColor "
+                "(e.g. image.astype(np.float32) in Python or src.convertTo(dst, CV_32F) in C++).",
+                colorDepthToString(depth).c_str(), VDepth::str().c_str()));
 
         if (_src.getObj() == _dst.getObj()) // inplace processing (#6653)
             _src.copyTo(src);
