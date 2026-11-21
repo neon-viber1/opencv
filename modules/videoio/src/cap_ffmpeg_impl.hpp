@@ -2026,6 +2026,16 @@ bool CvCapture_FFMPEG::retrieveFrame(int flag, unsigned char** data, int* step, 
     const int field_flags = AV_FRAME_FLAG_INTERLACED | AV_FRAME_FLAG_TOP_FIELD_FIRST;
     rgb_picture.flags = (rgb_picture.flags & ~field_flags) | (sw_picture->flags & field_flags);
 #endif
+    // sws_scale_frame() takes the conversion setup from the frames. If the output colour properties are
+    // unspecified, swscale (>= 8.12.100) treats HDR input (HLG, PQ) as a request for SDR BT.709 output
+    // and clips the highlights. Copy them from the input to keep the pre-4.13 behaviour (no HDR->SDR).
+    // Done on every frame since the properties belong to the decoded frame.
+#if LIBSWSCALE_BUILD >= CALC_FFMPEG_VERSION(8, 12, 100)
+    rgb_picture.color_primaries = sw_picture->color_primaries;
+    rgb_picture.color_trc = sw_picture->color_trc;
+    rgb_picture.colorspace = sw_picture->colorspace;
+    rgb_picture.color_range = sw_picture->color_range;
+#endif
     int sws_ret = sws_scale_frame(img_convert_ctx, &rgb_picture, sw_picture);
     if (sws_ret < 0)
     {

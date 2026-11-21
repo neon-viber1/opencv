@@ -1423,4 +1423,36 @@ TEST(videoio_ffmpeg, interlaced_frame_conversion_30299)
     EXPECT_EQ(Scalar(7037, 7037, 7037), cv::sum(frame));
 }
 
+// HDR (HLG, PQ) frames must not be converted to SDR with clipped highlights by retrieveFrame().
+// Sample video/hdr_ramp_hlg_256x64.mkv and video/hdr_ramp_pq_256x64.mkv (opencv_extra): lossless 10-bit grey ramp,
+// black to white, 256x64, tagged bt2020nc/bt2020 with arib-std-b67 (HLG) or smpte2084 (PQ) transfer. Generated with:
+//   ffmpeg -f rawvideo -pix_fmt yuv420p10le -s 256x64 -i ramp.yuv \
+//          -vf setparams=range=tv:colorspace=bt2020nc:color_primaries=bt2020:color_trc=arib-std-b67 -c:v libx264 -qp 0 out.mkv
+typedef testing::TestWithParam<string> videoio_ffmpeg_hdr;
+TEST_P(videoio_ffmpeg_hdr, ramp_is_not_clipped)
+{
+    if (!videoio_registry::hasBackend(CAP_FFMPEG))
+        throw SkipTestException("FFmpeg backend was not found");
+
+    VideoCapture cap(findDataFile(GetParam()), CAP_FFMPEG);
+    if (!cap.isOpened())
+        throw SkipTestException("FFmpeg backend can not open the 10-bit H.264 test stream");
+
+    Mat frame;
+    ASSERT_TRUE(cap.read(frame));
+    ASSERT_EQ(Size(256, 64), frame.size());
+
+    int clipped = 0, prev = 0;
+    for (int x = 0; x < frame.cols; x++)
+    {
+        const int g = frame.at<Vec3b>(frame.rows / 2, x)[1];
+        EXPECT_GE(g + 1, prev) << "ramp is not monotonic at column " << x;
+        clipped += (g == 255);
+        prev = g;
+    }
+    EXPECT_LE(clipped, 4) << "highlights are clipped";
+}
+INSTANTIATE_TEST_CASE_P(/**/, videoio_ffmpeg_hdr,
+    testing::Values("video/hdr_ramp_hlg_256x64.mkv", "video/hdr_ramp_pq_256x64.mkv"));
+
 }} // namespace
