@@ -313,7 +313,9 @@ void Domain_Filter::compute_NCfilter(Mat &output, Mat &hz, Mat &psketch, float r
     if (w < 2)
         return;
 
-    compute_boxfilter(output,hz,psketch,radius);
+    // Neighbouring domain positions are at least 1 apart, so any radius below 0.5
+    // selects only the centre pixel; keep the box non-empty for tiny radii.
+    compute_boxfilter(output,hz,psketch,std::max(radius, 0.5f));
 
     Mat box_filter = Mat::zeros(h,w+1,CV_32FC3);
 
@@ -389,8 +391,12 @@ void Domain_Filter::compute_NCfilter(Mat &output, Mat &hz, Mat &psketch, float r
                     q1=q1-1;
                 }
 
-                final.at<float>(i,j*channel+2-c) = (box_filter.at<float>(p-1,q*channel+(2-r)) - box_filter.at<float>(p1-1,q1*channel+(2-r1)))
-                    /(upper_idx.at<float>(i,j) - lower_idx.at<float>(i,j));
+                // An empty box (possible for tiny radii or rounding at large domain values)
+                // falls back to the input pixel instead of producing 0/0.
+                float cnt = upper_idx.at<float>(i,j) - lower_idx.at<float>(i,j);
+                final.at<float>(i,j*channel+2-c) = cnt > 0.f ?
+                    (box_filter.at<float>(p-1,q*channel+(2-r)) - box_filter.at<float>(p1-1,q1*channel+(2-r1))) / cnt :
+                    output.at<float>(i,j*channel+2-c);
             }
         }
     }
@@ -484,6 +490,13 @@ void Domain_Filter::filter(const Mat &img, Mat &res, float sigma_s = 60, float s
     int h = img.size().height;
     int w = img.size().width;
     float sigma_h = sigma_s;
+
+    // Zero (or invalid) sigma means no smoothing: return the input unchanged.
+    if (!(sigma_s > 0.f) || !(sigma_r > 0.f))
+    {
+        res = img.clone();
+        return;
+    }
 
     init(img,flags,sigma_s,sigma_r);
 
