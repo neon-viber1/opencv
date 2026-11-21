@@ -7,6 +7,16 @@
 
 using namespace cv;
 
+// Java MatOf* classes use the N x 1 layout; Mat(std::vector) is 1D since OpenCV 5.
+template<typename _Tp>
+static Mat vector_to_Mat_Nx1(const std::vector<_Tp>& v)
+{
+    Mat m(v, true);
+    if (m.empty())
+        return m;
+    return m.reshape(0, (int)v.size());
+}
+
 // vector_int
 
 template<typename _Tp>
@@ -32,7 +42,7 @@ void Mat_to_vector_int(Mat& mat, std::vector<int>& v_int)
 
 void vector_int_to_Mat(std::vector<int>& v_int, Mat& mat)
 {
-    mat = Mat(v_int, true);
+    mat = vector_to_Mat_Nx1(v_int);
 }
 
 
@@ -45,7 +55,7 @@ void Mat_to_vector_double(Mat& mat, std::vector<double>& v_double)
 
 void vector_double_to_Mat(std::vector<double>& v_double, Mat& mat)
 {
-    mat = Mat(v_double, true);
+    mat = vector_to_Mat_Nx1(v_double);
 }
 
 
@@ -58,7 +68,7 @@ void Mat_to_vector_float(Mat& mat, std::vector<float>& v_float)
 
 void vector_float_to_Mat(std::vector<float>& v_float, Mat& mat)
 {
-    mat = Mat(v_float, true);
+    mat = vector_to_Mat_Nx1(v_float);
 }
 
 
@@ -71,7 +81,7 @@ void Mat_to_vector_uchar(Mat& mat, std::vector<uchar>& v_uchar)
 
 void vector_uchar_to_Mat(std::vector<uchar>& v_uchar, Mat& mat)
 {
-    mat = Mat(v_uchar, true);
+    mat = vector_to_Mat_Nx1(v_uchar);
 }
 
 void Mat_to_vector_char(Mat& mat, std::vector<char>& v_char)
@@ -81,7 +91,7 @@ void Mat_to_vector_char(Mat& mat, std::vector<char>& v_char)
 
 void vector_char_to_Mat(std::vector<char>& v_char, Mat& mat)
 {
-    mat = Mat(v_char, true);
+    mat = vector_to_Mat_Nx1(v_char);
 }
 
 
@@ -94,7 +104,7 @@ void Mat_to_vector_Rect(Mat& mat, std::vector<Rect>& v_rect)
 
 void vector_Rect_to_Mat(std::vector<Rect>& v_rect, Mat& mat)
 {
-    mat = Mat(v_rect, true);
+    mat = vector_to_Mat_Nx1(v_rect);
 }
 
 //vector_Rect2d
@@ -106,7 +116,7 @@ void Mat_to_vector_Rect2d(Mat& mat, std::vector<Rect2d>& v_rect)
 
 void vector_Rect2d_to_Mat(std::vector<Rect2d>& v_rect, Mat& mat)
 {
-    mat = Mat(v_rect, true);
+    mat = vector_to_Mat_Nx1(v_rect);
 }
 
 //vector_RotatedRect
@@ -118,7 +128,7 @@ void Mat_to_vector_RotatedRect(Mat& mat, std::vector<RotatedRect>& v_rect)
 
 void vector_RotatedRect_to_Mat(std::vector<RotatedRect>& v_rect, Mat& mat)
 {
-    mat = Mat(v_rect, true);
+    mat = vector_to_Mat_Nx1(v_rect);
 }
 
 //vector_Point
@@ -159,32 +169,32 @@ void Mat_to_vector_Point3d(Mat& mat, std::vector<Point3d>& v_point)
 
 void vector_Point_to_Mat(std::vector<Point>& v_point, Mat& mat)
 {
-    mat = Mat(v_point, true);
+    mat = vector_to_Mat_Nx1(v_point);
 }
 
 void vector_Point2f_to_Mat(std::vector<Point2f>& v_point, Mat& mat)
 {
-    mat = Mat(v_point, true);
+    mat = vector_to_Mat_Nx1(v_point);
 }
 
 void vector_Point2d_to_Mat(std::vector<Point2d>& v_point, Mat& mat)
 {
-    mat = Mat(v_point, true);
+    mat = vector_to_Mat_Nx1(v_point);
 }
 
 void vector_Point3i_to_Mat(std::vector<Point3i>& v_point, Mat& mat)
 {
-    mat = Mat(v_point, true);
+    mat = vector_to_Mat_Nx1(v_point);
 }
 
 void vector_Point3f_to_Mat(std::vector<Point3f>& v_point, Mat& mat)
 {
-    mat = Mat(v_point, true);
+    mat = vector_to_Mat_Nx1(v_point);
 }
 
 void vector_Point3d_to_Mat(std::vector<Point3d>& v_point, Mat& mat)
 {
-    mat = Mat(v_point, true);
+    mat = vector_to_Mat_Nx1(v_point);
 }
 
 //vector_Mat
@@ -351,15 +361,15 @@ void vector_vector_Point3f_to_Mat(std::vector< std::vector< Point3f > >& vv_pt, 
 
 void vector_Vec4i_to_Mat(std::vector<Vec4i>& v_vec, Mat& mat)
 {
-    mat = Mat(v_vec, true);
+    mat = vector_to_Mat_Nx1(v_vec);
 }
 
 void vector_Vec4f_to_Mat(std::vector<Vec4f>& v_vec, Mat& mat)
 {
-    mat = Mat(v_vec, true);
+    mat = vector_to_Mat_Nx1(v_vec);
 }
 
 void vector_Vec6f_to_Mat(std::vector<Vec6f>& v_vec, Mat& mat)
 {
-    mat = Mat(v_vec, true);
+    mat = vector_to_Mat_Nx1(v_vec);
 }

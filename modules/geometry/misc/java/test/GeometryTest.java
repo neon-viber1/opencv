@@ -463,8 +463,8 @@ public class GeometryTest extends OpenCVTestCase {
 
         Geometry.undistortPoints(src, dst, cameraMatrix, distCoeffs);
 
-        assertEquals(src.cols(), dst.rows());
-        assertEquals(src.rows(), dst.cols());
+        assertEquals(src.rows(), dst.rows());
+        assertEquals(src.cols(), dst.cols());
         for(int i=0; i<src.toList().size(); i++) {
             //Log.d("UndistortPoints", "s="+src.get(i)+", d="+dst.get(i));
             assertTrue(src.toList().get(i).equals(dst.toList().get(i)));
@@ -530,7 +530,7 @@ public class GeometryTest extends OpenCVTestCase {
         MatOfInt expHull = new MatOfInt(
                 0, 1, 2, 3
         );
-        assertMatEqual(expHull, hull.reshape(1, (int)hull.total()), EPS);
+        assertMatEqual(expHull, hull, EPS);
     }
 
     public void testConvexHullMatMatBooleanBoolean() {
@@ -550,7 +550,26 @@ public class GeometryTest extends OpenCVTestCase {
         MatOfInt expHull = new MatOfInt(
                 3, 2, 1, 0
         );
-        assertMatEqual(expHull, hull.reshape(1, hull.cols()), EPS);
+        assertMatEqual(expHull, hull, EPS);
+    }
+
+    public void testConvexHullWriteBackIsNx1() {
+        MatOfPoint points = new MatOfPoint(
+                new Point(20, 0), new Point(40, 0),
+                new Point(30, 20), new Point(0, 20));
+        MatOfInt hull = new MatOfInt();
+        Geometry.convexHull(points, hull);
+
+        MatOfInt made = new MatOfInt(0, 1, 2, 3);
+        assertEquals(made.dims(), hull.dims());
+        assertEquals(made.rows(), hull.rows());
+        assertEquals(made.cols(), hull.cols());
+        assertEquals(1, hull.cols());
+        assertTrue(java.util.Arrays.equals(made.toArray(), hull.toArray()));
+
+        MatOfInt hull2 = new MatOfInt();
+        Geometry.convexHull(points, hull2);
+        assertMatEqual(hull, hull2, EPS);
     }
 
     public void testConvexityDefects() {
@@ -569,7 +588,7 @@ public class GeometryTest extends OpenCVTestCase {
         MatOfInt4 convexityDefects = new MatOfInt4();
         Geometry.convexityDefects(points, hull, convexityDefects);
 
-        assertMatEqual(new MatOfInt4(3, 0, 5, 3620), convexityDefects.reshape(4, convexityDefects.cols()));
+        assertMatEqual(new MatOfInt4(3, 0, 5, 3620), convexityDefects);
     }
 
         public void testFitEllipse() {
