@@ -1161,6 +1161,31 @@ TEST(Core_InputOutput, filestorage_json_escape_string)
     EXPECT_EQ(value, restored);
 }
 
+TEST(Core_InputOutput, filestorage_yaml_escape_string)
+{
+    const String values[] = {
+        "O'Reilly\x01", "a\x01" "c", String("\x01") + "1", "\x10", "\x1f", "\x80\xab\xff", "x\xff" "y"
+    };
+    for (size_t i = 0; i < sizeof(values)/sizeof(values[0]); i++)
+    {
+        FileStorage writer("test.yml", FileStorage::WRITE | FileStorage::MEMORY);
+        writer << "text" << values[i];
+        const String yaml = writer.releaseAndGetString();
+        EXPECT_EQ(String::npos, yaml.find("xffffff")) << yaml;
+
+        FileStorage reader(yaml, FileStorage::READ | FileStorage::MEMORY);
+        String restored;
+        reader["text"] >> restored;
+        EXPECT_EQ(values[i], restored) << yaml;
+    }
+
+    // hand-written escapes: hex is base 16, octal is base 8, following chars preserved
+    FileStorage reader("%YAML:1.0\n---\nt: \"\\x41\\x1fz\\101\\60b\"\n", FileStorage::READ | FileStorage::MEMORY);
+    String restored;
+    reader["t"] >> restored;
+    EXPECT_EQ(String("A\x1f" "zA0b"), restored);
+}
+
 TEST(Core_InputOutput, filestorage_utf8_bom)
 {
     EXPECT_NO_THROW(
