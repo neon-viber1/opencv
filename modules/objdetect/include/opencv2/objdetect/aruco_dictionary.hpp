@@ -81,6 +81,8 @@ class CV_EXPORTS_W_SIMPLE Dictionary {
      *
      * For each cell, the distance is increased when the difference between the detected
      * cell pixel ratio and the dictionary bit value is greater than `validBitIdThreshold`.
+     * A cell with a ratio of exactly 0.5 is resolved by the majority rule (bit 0): it is
+     * counted as differing only from a dictionary bit equal to 1.
      * If `allRotations` is set, the four possible marker rotations are considered.
      *
      * @param onlyCellPixelRatio markerSize x markerSize matrix (CV_32FC1) holding, for each cell,

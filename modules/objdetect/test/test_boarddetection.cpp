@@ -522,6 +522,30 @@ TEST(CV_ArucoDictionary, getDistanceToIdCellPixelRatio) {
 
 // 5x5 markers leave one meaningful bit in the final packed byte. Flip only that cell
 // far enough from its expected value and verify that the ratio distance counts it.
+TEST(CV_ArucoDictionary, getDistanceToIdCellPixelRatioTie) {
+    const int markerId = 0;
+    const float validBitIdThreshold = 0.49f;
+    aruco::Dictionary dictionary = aruco::getPredefinedDictionary(aruco::DICT_4X4_50);
+    Mat markerRatio = dictionary.getMarkerBits(markerId);
+    const int n = dictionary.markerSize;
+
+    // An exactly-half cell resolves to bit 0: no error for expected 0, one error for expected 1.
+    for(int y = 0; y < n; y++) {
+        for(int x = 0; x < n; x++) {
+            Mat ratio = markerRatio.clone();
+            const bool expectedOne = ratio.at<float>(y, x) > 0.5f;
+            ratio.at<float>(y, x) = 0.5f;
+            EXPECT_EQ(expectedOne ? 1 : 0, dictionary.getDistanceToId(ratio, markerId, false, validBitIdThreshold));
+            // Other in-band ratios stay errors for both values.
+            ratio.at<float>(y, x) = 0.495f;
+            EXPECT_EQ(1, dictionary.getDistanceToId(ratio, markerId, false, 0.45f));
+            // Threshold 0.5 disables the band: a tie is accepted for both values.
+            ratio.at<float>(y, x) = 0.5f;
+            EXPECT_EQ(0, dictionary.getDistanceToId(ratio, markerId, false, 0.5f));
+        }
+    }
+}
+
 TEST(CV_ArucoDictionary, getDistanceToIdCellPixelRatioPartialByte) {
     const int markerId = 15;
     const float validBitIdThreshold = 0.49f;

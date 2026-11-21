@@ -235,7 +235,14 @@ struct CV_EXPORTS_W_SIMPLE DetectorParameters {
     /// range [0,1], eq (2) from paper. The parameter tau_i has a direct influence on the processing speed.
     CV_PROP_RW float minMarkerLengthRatioOriginalImg;
 
-    /// range [0,1], define the acceptable threshold when comparing the detected marker to the dictionary during marker identification.
+    /** range [0,1], define the acceptable threshold when comparing the detected marker to the dictionary during marker identification.
+     *
+     * A cell whose white ratio lies within [validBitIdThreshold, 1 - validBitIdThreshold] is ambiguous and counts as an
+     * error for both bit values. A cell with a ratio of exactly 0.5 is resolved by the majority rule (bit 0) instead,
+     * and is an error only for bit 1. With the default sampling (perspectiveRemovePixelPerCell = 4, no margin) the only
+     * ratio inside the band is 0.5, so dictionaries that correct no bits are the most sensitive to this parameter.
+     * A value of 0.5 disables the band.
+     */
     CV_PROP_RW float validBitIdThreshold;
 };
 

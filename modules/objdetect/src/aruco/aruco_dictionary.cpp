@@ -32,8 +32,12 @@ struct CellBitMasks {
             const float* cellPixelRatioRow = onlyCellPixelRatio.ptr<float>(j);
             for(int i = 0; i < markerSize; i++) {
                 not0Byte <<= 1; not1Byte <<= 1;
-                if(cellPixelRatioRow[i] > validBitIdThreshold) not0Byte |= 1;
-                if(cellPixelRatioRow[i] < 1 - validBitIdThreshold) not1Byte |= 1;
+                const float ratio = cellPixelRatioRow[i];
+                // An exact tie (ratio == 0.5) inside the ambiguity band is resolved by the majority
+                // rule (bit 0), so it is an error only against bit 1.
+                const bool tie = (ratio == 0.5f && validBitIdThreshold < 0.5f);
+                if(ratio > validBitIdThreshold && !tie) not0Byte |= 1;
+                if(ratio < 1 - validBitIdThreshold || tie) not1Byte |= 1;
                 ++currentBit;
                 if(currentBit == 8) {
                     not0Writable[currentByte] = not0Byte;

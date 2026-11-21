@@ -170,6 +170,18 @@ class aruco_objdetect_test(NewOpenCVTests):
                                           validBitIdThreshold=valid_bit_id_threshold)
         self.assertEqual(dist, 1)
 
+        # An exactly-half cell resolves to bit 0: no error against 0, one error against 1.
+        tie_ratio = ratio_marker.copy()
+        tie_ratio[0, 0] = 0.5   # expected bit 0
+        self.assertEqual(aruco_dict.getDistanceToId(tie_ratio, idx, True, valid_bit_id_threshold), 0)
+        tie_ratio = ratio_marker.copy()
+        tie_ratio[0, 1] = 0.5   # expected bit 1
+        self.assertEqual(aruco_dict.getDistanceToId(tie_ratio, idx, True, valid_bit_id_threshold), 1)
+        # Other in-band ratios remain errors for both values.
+        band_ratio = ratio_marker.copy()
+        band_ratio[0, 0] = 0.495
+        self.assertEqual(aruco_dict.getDistanceToId(band_ratio, idx, True, 0.45), 1)
+
     def test_aruco_detector(self):
         aruco_params = cv.aruco.DetectorParameters()
         aruco_dict = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
