@@ -17,7 +17,8 @@ void Mat_to_MatShape(cv::Mat& mat, cv::MatShape& matshape)
 
 void MatShape_to_Mat(cv::MatShape& matshape, cv::Mat& mat)
 {
-    mat = cv::Mat(matshape, true);
+    cv::Mat m(matshape, true);
+    mat = m.empty() ? m : m.reshape(0, (int)matshape.size());
 }
 
 std::vector<cv::MatShape> List_to_vector_MatShape(JNIEnv* env, jobject list)
