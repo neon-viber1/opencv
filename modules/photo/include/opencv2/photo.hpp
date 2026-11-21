@@ -850,8 +850,8 @@ filters are used in many different applications @cite EM11 .
 @param src Input 8-bit 3-channel image.
 @param dst Output 8-bit 3-channel image.
 @param flags Edge preserving filters: cv::RECURS_FILTER or cv::NORMCONV_FILTER
-@param sigma_s %Range between 0 to 200.
-@param sigma_r %Range between 0 to 1.
+@param sigma_s %Range between 0 to 200. With 0 the input is returned unsmoothed.
+@param sigma_r %Range between 0 to 1. With 0 the input is returned unsmoothed.
  */
 CV_EXPORTS_W void edgePreservingFilter(InputArray src, OutputArray dst, int flags = 1,
         float sigma_s = 60, float sigma_r = 0.4f);
@@ -860,8 +860,8 @@ CV_EXPORTS_W void edgePreservingFilter(InputArray src, OutputArray dst, int flag
 
 @param src Input 8-bit 3-channel image.
 @param dst Output image with the same size and type as src.
-@param sigma_s %Range between 0 to 200.
-@param sigma_r %Range between 0 to 1.
+@param sigma_s %Range between 0 to 200. With 0 the input is returned unsmoothed.
+@param sigma_r %Range between 0 to 1. With 0 the input is returned unsmoothed.
  */
 CV_EXPORTS_W void detailEnhance(InputArray src, OutputArray dst, float sigma_s = 10,
         float sigma_r = 0.15f);
@@ -887,8 +887,8 @@ contrast while preserving, or enhancing, high-contrast features.
 
 @param src Input 8-bit 3-channel image.
 @param dst Output image with the same size and type as src.
-@param sigma_s %Range between 0 to 200.
-@param sigma_r %Range between 0 to 1.
+@param sigma_s %Range between 0 to 200. With 0 the input is returned unsmoothed.
+@param sigma_r %Range between 0 to 1. With 0 the input is returned unsmoothed.
  */
 CV_EXPORTS_W void stylization(InputArray src, OutputArray dst, float sigma_s = 60,
         float sigma_r = 0.45f);

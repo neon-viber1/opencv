@@ -162,4 +162,56 @@ TEST(Photo_NPR_EdgePreserveSmoothing_NormConvFilter, degenerate_dimension_29614)
     EXPECT_EQ(rowResult.size(), rowSrc.size());
 }
 
+static Mat makeZeroSigmaImage()
+{
+    Mat img(96, 128, CV_8UC3);
+    RNG rng(1234);
+    for (int y = 0; y < img.rows; y++)
+        for (int x = 0; x < img.cols; x++)
+            img.at<Vec3b>(y, x) = Vec3b(saturate_cast<uchar>(x * 2 + rng.uniform(0, 8)),
+                                        saturate_cast<uchar>(y * 2 + rng.uniform(0, 8)),
+                                        saturate_cast<uchar>(((x / 16 + y / 16) & 1) ? 200 : 40));
+    return img;
+}
+
+static void checkNotFlat(const Mat& src, const Mat& dst, double maxDiff)
+{
+    ASSERT_EQ(src.size(), dst.size());
+    double meanDiff = cv::mean(cv::Mat(cv::abs(src - dst)).reshape(1))[0];
+    EXPECT_LE(meanDiff, maxDiff);
+    Scalar m, sd;
+    meanStdDev(dst.reshape(1), m, sd);
+    EXPECT_GT(sd[0], 10.0);
+}
+
+TEST(Photo_NPR_ZeroSigma, returns_input)
+{
+    Mat src = makeZeroSigmaImage(), dst;
+    const float zs[] = {0.f, 1e-6f, 1e-5f};
+    for (int f = 1; f <= 2; f++)
+    {
+        edgePreservingFilter(src, dst, f, 0.f, 0.4f);
+        checkNotFlat(src, dst, 1.0);
+        edgePreservingFilter(src, dst, f, 60.f, 0.f);
+        checkNotFlat(src, dst, 1.0);
+        edgePreservingFilter(src, dst, f, 0.f, 0.f);
+        checkNotFlat(src, dst, 1.0);
+    }
+    stylization(src, dst, 0.f, 0.45f);
+    EXPECT_GT(cv::norm(dst, NORM_INF), 0);
+    stylization(src, dst, 60.f, 0.f);
+    EXPECT_GT(cv::norm(dst, NORM_INF), 0);
+    detailEnhance(src, dst, 0.f, 0.15f);
+    checkNotFlat(src, dst, 1.0);
+    detailEnhance(src, dst, 10.f, 0.f);
+    checkNotFlat(src, dst, 1.0);
+    for (float z : zs)
+    {
+        edgePreservingFilter(src, dst, 2, z, 0.4f);
+        checkNotFlat(src, dst, 1.0);
+        edgePreservingFilter(src, dst, 2, 60.f, z);
+        checkNotFlat(src, dst, 20.0);
+    }
+}
+
 }} // namespace
