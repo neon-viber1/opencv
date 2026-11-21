@@ -2953,8 +2953,17 @@ bool CvVideoWriter_FFMPEG::writeFrame( const unsigned char* data, int step, int 
         CV_Assert(false);
     }
 
-    if( (width & -2) != frame_width || (height & -2) != frame_height || !data )
+    if (!data)
+    {
+        CV_LOG_WARNING(NULL, "write frame skipped - input image is empty");
         return false;
+    }
+    if ((width & -2) != frame_width || (height & -2) != frame_height)
+    {
+        CV_LOG_WARNING(NULL, "write frame skipped - frame size " << width << "x" << height
+                       << " does not match VideoWriter frame size " << frame_width << "x" << frame_height);
+        return false;
+    }
     width = frame_width;
     height = frame_height;
 

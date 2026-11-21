@@ -1423,4 +1423,30 @@ TEST(videoio_ffmpeg, interlaced_frame_conversion_30299)
     EXPECT_EQ(Scalar(7037, 7037, 7037), cv::sum(frame));
 }
 
+TEST(videoio_ffmpeg, write_frame_size_mismatch_message)
+{
+    if (!videoio_registry::hasBackend(CAP_FFMPEG))
+        throw SkipTestException("FFmpeg backend was not found");
+
+    const string filename = cv::tempfile(".avi");
+    VideoWriter writer(filename, CAP_FFMPEG, VideoWriter::fourcc('F', 'F', 'V', '1'), 1, Size(100, 100), false);
+    if (!writer.isOpened())
+    {
+        remove(filename.c_str());
+        throw SkipTestException("FFmpeg backend can not open FFV1 writer");
+    }
+
+    Mat good = Mat::zeros(100, 100, CV_8UC1);
+    Mat bad = Mat::zeros(100, 102, CV_8UC1);
+
+    testing::internal::CaptureStderr();
+    EXPECT_NO_THROW(writer.write(good));
+    EXPECT_NO_THROW(writer.write(bad));
+    const string log = testing::internal::GetCapturedStderr();
+    writer.release();
+    remove(filename.c_str());
+
+    EXPECT_NE(string::npos, log.find("frame size 102x100 does not match VideoWriter frame size 100x100")) << log;
+}
+
 }} // namespace
