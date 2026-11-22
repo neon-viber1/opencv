@@ -1661,19 +1661,18 @@ inline v_int8x32 v256_lut(const schar* tab, const int* idx)
 }
 inline v_int8x32 v256_lut_pairs(const schar* tab, const int* idx)
 {
-    return v_int8x32(_v256_setr_h(*(const short*)(tab + idx[ 0]), *(const short*)(tab + idx[ 1]), *(const short*)(tab + idx[ 2]),
-                                  *(const short*)(tab + idx[ 3]), *(const short*)(tab + idx[ 4]), *(const short*)(tab + idx[ 5]),
-                                  *(const short*)(tab + idx[ 6]), *(const short*)(tab + idx[ 7]), *(const short*)(tab + idx[ 8]),
-                                  *(const short*)(tab + idx[ 9]), *(const short*)(tab + idx[10]), *(const short*)(tab + idx[11]),
-                                  *(const short*)(tab + idx[12]), *(const short*)(tab + idx[13]), *(const short*)(tab + idx[14]),
-                                  *(const short*)(tab + idx[15])));
+    short v[16];
+    for (int i = 0; i < 16; i++)
+        memcpy(&v[i], tab + idx[i], sizeof(short));
+    return v_int8x32(_v256_setr_h(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7],
+                                  v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15]));
 }
 inline v_int8x32 v256_lut_quads(const schar* tab, const int* idx)
 {
-    return v_int8x32(_v256_setr_w(*(const int*)(tab + idx[0]), *(const int*)(tab + idx[1]),
-                                  *(const int*)(tab + idx[2]), *(const int*)(tab + idx[3]),
-                                  *(const int*)(tab + idx[4]), *(const int*)(tab + idx[5]),
-                                  *(const int*)(tab + idx[6]), *(const int*)(tab + idx[7])));
+    int v[8];
+    for (int i = 0; i < 8; i++)
+        memcpy(&v[i], tab + idx[i], sizeof(int));
+    return v_int8x32(_v256_setr_w(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]));
 }
 inline v_uint8x32 v256_lut(const uchar* tab, const int* idx) { return v_reinterpret_as_u8(v256_lut((const schar *)tab, idx)); }
 inline v_uint8x32 v256_lut_pairs(const uchar* tab, const int* idx) { return v_reinterpret_as_u8(v256_lut_pairs((const schar *)tab, idx)); }

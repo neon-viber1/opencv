@@ -1598,10 +1598,10 @@ inline v_int8x32 v256_lut(const schar* tab, const int* idx)
 }
 inline v_int8x32 v256_lut_pairs(const schar* tab, const int* idx)
 {
-    return v_int8x32(_mm256_setr_epi16(*(const short*)(tab + idx[ 0]), *(const short*)(tab + idx[ 1]), *(const short*)(tab + idx[ 2]), *(const short*)(tab + idx[ 3]),
-                                       *(const short*)(tab + idx[ 4]), *(const short*)(tab + idx[ 5]), *(const short*)(tab + idx[ 6]), *(const short*)(tab + idx[ 7]),
-                                       *(const short*)(tab + idx[ 8]), *(const short*)(tab + idx[ 9]), *(const short*)(tab + idx[10]), *(const short*)(tab + idx[11]),
-                                       *(const short*)(tab + idx[12]), *(const short*)(tab + idx[13]), *(const short*)(tab + idx[14]), *(const short*)(tab + idx[15])));
+    short v[16];
+    for (int i = 0; i < 16; i++)
+        memcpy(&v[i], tab + idx[i], sizeof(short));
+    return v_int8x32(_mm256_loadu_si256((const __m256i*)v));
 }
 inline v_int8x32 v256_lut_quads(const schar* tab, const int* idx)
 {

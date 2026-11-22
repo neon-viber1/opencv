@@ -305,4 +305,50 @@ TEST(Resize_Bitexact, NearestExact_PillowCompat)
     }
 }
 
+// Horizontal sampling offsets are odd for many pixels with non-integer scales;
+// the SIMD lookup helpers must not assume alignment of the source pointers.
+// Border pixels are skipped: only the interior is compared to a float reference
+// (fixed-point arithmetic of the 8-bit path allows a small deviation).
+TEST(Resize_Linear_8U, odd_offsets_unaligned_lut)
+{
+    RNG& rng = theRNG();
+    const double scales[] = { 1.19, 1.5, 0.83, 2.37 };
+    for (int cn = 1; cn <= 2; cn++)
+    {
+        for (size_t si = 0; si < sizeof(scales)/sizeof(scales[0]); si++)
+        {
+            const double scale = scales[si];
+            Mat src(67, 71, CV_8UC(cn));
+            rng.fill(src, RNG::UNIFORM, 0, 256);
+            Mat dst;
+            resize(src, dst, Size(), scale, scale, INTER_LINEAR);
+            ASSERT_FALSE(dst.empty());
+
+            const double sx = 1.0 / scale, sy = 1.0 / scale;
+            int maxDiff = 0;
+            for (int y = 2; y < dst.rows - 2; y++)
+            {
+                double fy = (y + 0.5) * sy - 0.5;
+                int y0 = cvFloor(fy); double wy = fy - y0;
+                int y1 = std::min(std::max(y0 + 1, 0), src.rows - 1);
+                y0 = std::min(std::max(y0, 0), src.rows - 1);
+                for (int x = 2; x < dst.cols - 2; x++)
+                {
+                    double fx = (x + 0.5) * sx - 0.5;
+                    int x0 = cvFloor(fx); double wx = fx - x0;
+                    int x1 = std::min(std::max(x0 + 1, 0), src.cols - 1);
+                    x0 = std::min(std::max(x0, 0), src.cols - 1);
+                    for (int c = 0; c < cn; c++)
+                    {
+                        double v = (src.ptr<uchar>(y0)[x0*cn+c] * (1-wx) + src.ptr<uchar>(y0)[x1*cn+c] * wx) * (1-wy) +
+                                   (src.ptr<uchar>(y1)[x0*cn+c] * (1-wx) + src.ptr<uchar>(y1)[x1*cn+c] * wx) * wy;
+                        maxDiff = std::max(maxDiff, (int)std::abs(cvRound(v) - (int)dst.ptr<uchar>(y)[x*cn+c]));
+                    }
+                }
+            }
+            EXPECT_LE(maxDiff, 2) << "cn=" << cn << " scale=" << scale;
+        }
+    }
+}
+
 }} // namespace
